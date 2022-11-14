@@ -1,0 +1,31 @@
+[package]
+name = "ctlog"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "duskmoon (Campbell He) <kp.campbell.he@duskmoon314.com>",
+    "stack-rs",
+]
+description = "A simple certificate transparency log client API wrapper"
+categories = ["web-programming::http-client", "api-bindings"]
+keywords = ["certificate", "network", "web", "security", "api"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/stack-rs/ctlog"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0.37"
+tokio = { version = "1.21", features = ["rt", "net"] }
+url = "2.3"
+
+[dev-dependencies]
+anyhow = "1.0"
+tokio = { version = "1.21.2", features = [
+    "rt",
+    "net",
+    "macros",
+    "rt-multi-thread",
+] }
