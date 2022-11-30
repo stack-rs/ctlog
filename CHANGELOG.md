@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Type definitions of log entries
+- Parsing log entries via `base64` `deku`
+
 ## [0.1.0] - 2022-11-14
 
 ### Added

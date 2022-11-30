@@ -8,6 +8,10 @@ pub enum CTLogError {
     ParseUrlError(#[from] url::ParseError),
     #[error("reqwest error: {0}")]
     ReqwestError(#[from] reqwest::Error),
+    #[error("deku error: {0}")]
+    DekuError(#[from] deku::DekuError),
+    #[error("base64 error: {0}")]
+    Base64Error(#[from] base64::DecodeError),
 }
 
 pub mod client;
