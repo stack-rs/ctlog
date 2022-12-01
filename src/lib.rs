@@ -18,3 +18,5 @@ pub mod client;
 pub use client::CTLogV1;
 
 pub mod ct;
+
+pub(crate) mod utils;

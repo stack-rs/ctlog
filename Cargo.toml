@@ -16,7 +16,10 @@ repository = "https://github.com/stack-rs/ctlog"
 
 [dependencies]
 base64 = "0.13.1"
+chrono = "0.4.23"
 deku = "0.15.0"
+oid-registry = { version = "0.6.0", features = ["x509"] }
+ouroboros = "0.15.5"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0.37"

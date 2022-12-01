@@ -105,6 +105,22 @@ impl CTLogV1 {
         Ok(response)
     }
 
+    /// Retrieve Entries from Log and decode them
+    ///
+    /// [get_entries](CTLogV1::get_entries)
+    pub async fn get_entries_decoded(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<DecodedEntry>, CTLogError> {
+        let entries = self.get_entries(start, end).await?.entries;
+        let decoded_entries = entries
+            .iter()
+            .map(|entry| entry.try_into().unwrap())
+            .collect();
+        Ok(decoded_entries)
+    }
+
     /// Retrieve Accepted Root Certificates
     ///
     /// [RFC 6962 4.7](https://datatracker.ietf.org/doc/html/rfc6962#section-4.7)

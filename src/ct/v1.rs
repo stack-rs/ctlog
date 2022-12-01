@@ -1,8 +1,16 @@
+use std::fmt;
+
+use chrono::TimeZone;
 use deku::prelude::*;
+use oid_registry::{format_oid, OidRegistry};
+use ouroboros::self_referencing;
 use serde::{Deserialize, Serialize};
 use x509_parser::prelude::*;
 
-use crate::CTLogError;
+use crate::{
+    utils::{print_x509_extension, print_x509_ski},
+    CTLogError,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AddChainResponse {
@@ -62,7 +70,7 @@ pub struct GetProofByHashResponse {
     pub audit_path: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Entry {
     /// The base64-encoded MerkleTreeLeaf structure.
     pub leaf_input: String,
@@ -102,6 +110,123 @@ pub struct GetEntryAndProofResponse {
     pub audit_path: Vec<String>,
 }
 
+#[self_referencing(pub_extras)]
+#[derive(Debug)]
+pub struct WrapX509Certificate {
+    raw: Vec<u8>,
+    #[borrows(raw)]
+    #[covariant]
+    pub certificate: X509Certificate<'this>,
+}
+
+impl WrapX509Certificate {
+    pub fn from_bytes(v: &[u8]) -> Result<Self, DekuError> {
+        Ok(WrapX509CertificateBuilder {
+            raw: v.to_vec(),
+            certificate_builder: |raw: &Vec<u8>| X509Certificate::from_der(raw).unwrap().1,
+        }
+        .build())
+    }
+}
+
+impl fmt::Display for WrapX509Certificate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let certificate = self.borrow_certificate();
+        writeln!(f, "Certificate:")?;
+        writeln!(f, "  Data:")?;
+        writeln!(f, "    Version: {}", certificate.version())?;
+        writeln!(
+            f,
+            "    Serial Number: {} ({})",
+            certificate.serial,
+            certificate.raw_serial_as_string()
+        )?;
+        writeln!(
+            f,
+            "  Signature Algorithm: {}",
+            format_oid(
+                certificate.signature_algorithm.oid(),
+                &OidRegistry::default().with_all_crypto()
+            )
+        )?;
+        writeln!(f, "    Issuer: {}", certificate.issuer())?;
+        writeln!(f, "    Validity:")?;
+        writeln!(f, "      Not Before: {}", certificate.validity().not_before)?;
+        writeln!(f, "      Not After : {}", certificate.validity().not_after)?;
+        writeln!(f, "    Subject: {}", certificate.subject())?;
+        writeln!(f, "    Subject Public Key Info:")?;
+        print_x509_ski(f, certificate.public_key(), 6)?;
+
+        if !certificate.extensions().is_empty() {
+            writeln!(f, "    X509v3 extensions:")?;
+            for extension in certificate.extensions() {
+                print_x509_extension(f, &extension.oid, extension, 6)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[self_referencing(pub_extras)]
+#[derive(Debug)]
+pub struct WrapTbsCertificate {
+    raw: Vec<u8>,
+    #[borrows(raw)]
+    #[covariant]
+    pub certificate: TbsCertificate<'this>,
+}
+
+impl WrapTbsCertificate {
+    pub fn from_bytes(v: &[u8]) -> Result<Self, DekuError> {
+        Ok(WrapTbsCertificateBuilder {
+            raw: v.to_vec(),
+            certificate_builder: |raw: &Vec<u8>| TbsCertificate::from_der(raw).unwrap().1,
+        }
+        .build())
+    }
+}
+
+impl fmt::Display for WrapTbsCertificate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let certificate = self.borrow_certificate();
+
+        writeln!(f, "Certificate:")?;
+        writeln!(f, "  Data:")?;
+        writeln!(f, "    Version: {}", certificate.version())?;
+        writeln!(
+            f,
+            "    Serial Number: {} ({})",
+            certificate.serial,
+            certificate.raw_serial_as_string()
+        )?;
+        writeln!(
+            f,
+            "  Signature Algorithm: {}",
+            format_oid(
+                certificate.signature.oid(),
+                &OidRegistry::default().with_all_crypto()
+            )
+        )?;
+        writeln!(f, "    Issuer: {}", certificate.issuer())?;
+        writeln!(f, "    Validity:")?;
+        writeln!(f, "      Not Before: {}", certificate.validity().not_before)?;
+        writeln!(f, "      Not After : {}", certificate.validity().not_after)?;
+        writeln!(f, "    Subject: {}", certificate.subject())?;
+        writeln!(f, "    Subject Public Key Info:")?;
+        print_x509_ski(f, certificate.public_key(), 6)?;
+
+        if !certificate.extensions().is_empty() {
+            writeln!(f, "    X509v3 extensions:")?;
+            for extension in certificate.extensions() {
+                print_x509_extension(f, &extension.oid, extension, 6)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, DekuRead)]
 #[deku(type = "u16", endian = "big")]
 pub enum LogEntryType {
@@ -109,29 +234,35 @@ pub enum LogEntryType {
     PrecertEntry = 1,
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct ASN1Cert<'a> {
+#[derive(Debug, DekuRead)]
+pub struct ASN1Cert {
     #[deku(bytes = 3, endian = "big")]
     pub length: u32,
     #[deku(
         count = "length",
-        map = "|v: &'a [u8]| -> Result<_, DekuError> { Ok(X509Certificate::from_der(v).unwrap().1) }"
+        map = "|v: &[u8]| -> Result<_, DekuError> { Ok(Box::new(WrapX509Certificate::from_bytes(v).unwrap())) }"
     )]
-    pub certificate: X509Certificate<'a>,
+    pub certificate: Box<WrapX509Certificate>,
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct ASN1CertChain<'a> {
+impl fmt::Display for ASN1Cert {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.certificate.fmt(f)
+    }
+}
+
+#[derive(Debug, DekuRead)]
+pub struct ASN1CertChain {
     #[deku(bytes = 3, endian = "big")]
     pub length: u32,
     #[deku(bytes_read = "length")]
-    pub certificates: Vec<ASN1Cert<'a>>,
+    pub certificates: Vec<ASN1Cert>,
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct PrecertChainEntry<'a> {
-    pub pre_certificate: ASN1Cert<'a>,
-    pub precertificate_chain: ASN1CertChain<'a>,
+#[derive(Debug, DekuRead)]
+pub struct PrecertChainEntry {
+    pub pre_certificate: ASN1Cert,
+    pub precertificate_chain: ASN1CertChain,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, DekuRead)]
@@ -140,16 +271,34 @@ pub enum Version {
     V1 = 0,
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct PreCert<'a> {
-    pub issuer_key_hash: [u8; 32],
+#[derive(Debug, DekuRead)]
+pub struct IssuerKeyHash([u8; 32]);
+
+impl fmt::LowerHex for IssuerKeyHash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for byte in &self.0 {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, DekuRead)]
+pub struct PreCert {
+    pub issuer_key_hash: IssuerKeyHash,
     #[deku(bytes = 3, endian = "big")]
     pub length: u32,
     #[deku(
         count = "length",
-        map = "|v: &'a [u8]| -> Result<_, DekuError> { println!(\"{:?}\", v);Ok(TbsCertificate::from_der(v).unwrap().1) }"
+        map = "|v: &[u8]| -> Result<_, DekuError> { Ok(Box::new(WrapTbsCertificate::from_bytes(v).unwrap())) }"
     )]
-    pub tbs_certificate: TbsCertificate<'a>,
+    pub tbs_certificate: Box<WrapTbsCertificate>,
+}
+
+impl fmt::Display for PreCert {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.tbs_certificate.fmt(f)
+    }
 }
 
 #[derive(Debug, Clone, DekuRead)]
@@ -166,41 +315,102 @@ pub enum MerkleLeafType {
     TimestampedEntry = 0,
 }
 
-#[derive(Debug, Clone, DekuRead)]
+#[derive(Debug, DekuRead)]
 #[deku(ctx = "entry_type: LogEntryType", id = "entry_type")]
-pub enum TimestampedEntrySignedInner<'a> {
+pub enum TimestampedEntrySignedInner {
     #[deku(id = "LogEntryType::X509Entry")]
-    X509(ASN1Cert<'a>),
+    X509(ASN1Cert),
     #[deku(id = "LogEntryType::PrecertEntry")]
-    Precert(PreCert<'a>),
+    Precert(PreCert),
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct TimestampedEntry<'a> {
+#[derive(Debug, DekuRead)]
+pub struct TimestampedEntry {
     #[deku(endian = "big")]
     pub timestamp: u64,
     pub entry_type: LogEntryType,
     #[deku(ctx = "entry_type.clone()")]
-    pub signed_entry: TimestampedEntrySignedInner<'a>,
+    pub signed_entry: TimestampedEntrySignedInner,
     pub extensions: CtExtensions,
 }
 
-#[derive(Debug, Clone, DekuRead)]
-pub struct MerkleTreeLeaf<'a> {
+#[derive(Debug, DekuRead)]
+pub struct MerkleTreeLeaf {
     pub version: Version,
     pub leaf_type: MerkleLeafType,
-    pub timestamped_entry: TimestampedEntry<'a>,
+    pub timestamped_entry: TimestampedEntry,
 }
 
-#[derive(Debug, Clone)]
-pub enum DecodedEntryInner<'a> {
-    X509(ASN1CertChain<'a>),
-    Precert(PrecertChainEntry<'a>),
+#[derive(Debug)]
+pub enum DecodedEntryInner {
+    X509(ASN1CertChain),
+    Precert(PrecertChainEntry),
 }
 
 /// A structure representing a log entry (parsed from the response of /ct/v1/get-entries).
-#[derive(Debug, Clone)]
-pub struct DecodedEntry<'a> {
-    pub leaf: MerkleTreeLeaf<'a>,
-    pub extra_data: DecodedEntryInner<'a>,
+#[derive(Debug)]
+pub struct DecodedEntry {
+    pub leaf: MerkleTreeLeaf,
+    pub extra_data: DecodedEntryInner,
+}
+
+impl TryFrom<&Entry> for DecodedEntry {
+    type Error = CTLogError;
+
+    fn try_from(entry: &Entry) -> Result<Self, CTLogError> {
+        let leaf = MerkleTreeLeaf::from_bytes((&base64::decode(entry.leaf_input.clone())?, 0))?.1;
+
+        let extra_data = match leaf.timestamped_entry.entry_type {
+            LogEntryType::X509Entry => {
+                let cert_chain =
+                    ASN1CertChain::from_bytes((&base64::decode(&entry.extra_data)?, 0))?.1;
+                DecodedEntryInner::X509(cert_chain)
+            }
+            LogEntryType::PrecertEntry => {
+                let precert_chain =
+                    PrecertChainEntry::from_bytes((&base64::decode(&entry.extra_data)?, 0))?.1;
+                DecodedEntryInner::Precert(precert_chain)
+            }
+        };
+
+        Ok(Self { leaf, extra_data })
+    }
+}
+
+impl fmt::Display for DecodedEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Timestamp={} ({}) ",
+            self.leaf.timestamped_entry.timestamp,
+            chrono::Utc
+                .timestamp_millis_opt(self.leaf.timestamped_entry.timestamp as i64)
+                .unwrap()
+        )?;
+
+        match (
+            &self.leaf.timestamped_entry.entry_type,
+            &self.leaf.timestamped_entry.signed_entry,
+        ) {
+            (LogEntryType::X509Entry, TimestampedEntrySignedInner::X509(certificate)) => {
+                writeln!(f, "X.509 certificate:")?;
+                writeln!(f, "{certificate}")?;
+
+                // TODO: print the chain
+            }
+            (LogEntryType::PrecertEntry, TimestampedEntrySignedInner::Precert(certificate)) => {
+                writeln!(
+                    f,
+                    "pre-certificate from issuer with keyhash {:x}:",
+                    certificate.issuer_key_hash
+                )?;
+                writeln!(f, "{certificate}")?;
+
+                // TODO: print the chain
+            }
+            _ => unreachable!(),
+        }
+
+        Ok(())
+    }
 }

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Type definitions of log entries
 - Parsing log entries via `base64` `deku`
+- Simple `Display` for certificates
 
 ## [0.1.0] - 2022-11-14
 
