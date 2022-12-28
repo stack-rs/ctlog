@@ -158,7 +158,7 @@ pub fn print_x509_extension(
                 indent = indent
             )?;
 
-            for point in points {
+            for point in points.iter() {
                 if let Some(name) = &point.distribution_point {
                     writeln!(
                         f,
